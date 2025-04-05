@@ -27,7 +27,7 @@ namespace DurableQueueTests
                 list.Add(Random.Shared.Next());
             }
 
-            await queue.Enqueue(list);
+            await queue.BulkEnqueue(list);
         }
 
         [Fact]
@@ -44,9 +44,9 @@ namespace DurableQueueTests
                 list.Add(Random.Shared.Next());
             }
 
-            await queue.Enqueue(list);
+            await queue.BulkEnqueue(list);
 
-            var item = await queue.Dequeue(itemCnt);
+            var item = await queue.BulkDequeue(itemCnt);
         }
     }
 }

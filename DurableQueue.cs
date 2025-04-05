@@ -50,7 +50,7 @@ namespace DurableQueue
             }
         }
 
-        public async Task Enqueue(IEnumerable<T> items)
+        public async Task BulkEnqueue(IEnumerable<T> items)
         {
             if (items == null || !items.Any())
                 throw new ArgumentNullException("Item cannot be null");
@@ -84,7 +84,7 @@ namespace DurableQueue
             }
         }
 
-        public async Task<IEnumerable<T?>> Dequeue(int cnt = 1)
+        public async Task<IEnumerable<T?>> BulkDequeue(int cnt = 1)
         {
             try
             {
