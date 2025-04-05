@@ -4,6 +4,8 @@ VisualStudioVersion = 17.13.35913.81
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DurableQueue", "DurableQueue.csproj", "{D0E77BE9-376B-46D2-A306-E182BDD912D1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DurableQueueTests", "DurableQueueTests\DurableQueueTests.csproj", "{36B71C8E-32F6-419A-8D96-CD215053B2E8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,6 +16,10 @@ Global
 		{D0E77BE9-376B-46D2-A306-E182BDD912D1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D0E77BE9-376B-46D2-A306-E182BDD912D1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D0E77BE9-376B-46D2-A306-E182BDD912D1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{36B71C8E-32F6-419A-8D96-CD215053B2E8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36B71C8E-32F6-419A-8D96-CD215053B2E8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36B71C8E-32F6-419A-8D96-CD215053B2E8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36B71C8E-32F6-419A-8D96-CD215053B2E8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
