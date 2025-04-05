@@ -26,8 +26,30 @@ namespace DurableQueue.Repository
             if (string.IsNullOrEmpty(queueName))
                 throw new ArgumentNullException("Queue name cannot be null or empty");
 
-            _connection = new SqliteConnection($"Data Source={queueName}.db");
+            var folderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "QueueData");
+
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+
+            var dataSource = Path.Combine(folderPath, $"{queueName}.db");
+            _connection = new SqliteConnection($"Data Source={dataSource}");
+
             _connection.Open();
+
+            using (var command = _connection.CreateCommand())
+            {
+                command.CommandText = @"
+                    PRAGMA journal_mode = WAL;
+                    PRAGMA synchronous = NORMAL;
+                    PRAGMA cache_size = 100000;
+                    PRAGMA temp_store = MEMORY;
+                    PRAGMA locking_mode = EXCLUSIVE;
+                ";
+
+                command.ExecuteNonQuery();
+            }
 
             CreateDbQueueIfNotExists().GetAwaiter().GetResult();
 
@@ -82,7 +104,7 @@ namespace DurableQueue.Repository
             }
         }
 
-        internal async Task Enqueue(byte[] item)
+        internal async Task Enqueue(IEnumerable<byte[]> items)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
@@ -93,16 +115,21 @@ namespace DurableQueue.Repository
             {
                 var command = _connection.CreateCommand();
 
-                command.CommandText =
-                @"
-                    INSERT INTO queue (Item, CreatedAt)
-                    VALUES ($item, $createdAt);
-                ";
+                command.Transaction = transaction;
+                command.CommandText = "INSERT INTO queue (Item, CreatedAt) VALUES (@item, @createdAt)";
+                var itemParam = new SqliteParameter("@item", SqliteType.Blob);
+                var dateTimeParam = new SqliteParameter("@createdAt", SqliteType.Text);
 
-                command.Parameters.AddWithValue("$item", item);
-                command.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
+                command.Parameters.Add(itemParam);
+                command.Parameters.Add(dateTimeParam);
 
-                await command.ExecuteNonQueryAsync();
+                foreach (var data in items)
+                {
+                    itemParam.Value = data;
+                    dateTimeParam.Value = DateTime.UtcNow.ToString("o");
+                    await command.ExecuteNonQueryAsync();
+                }
+
                 await transaction.CommitAsync();
             }
             catch (Exception ex)
@@ -112,7 +139,7 @@ namespace DurableQueue.Repository
             }
         }
 
-        internal async Task<byte[]?> Dequeue()
+        internal async Task Delete(int nrOfItems)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
@@ -121,42 +148,27 @@ namespace DurableQueue.Repository
 
             try
             {
-                var command = _connection.CreateCommand();
 
-                command.CommandText =
-                @"
-                    SELECT Id, Item
-                    FROM queue
-                    ORDER BY Id ASC
-                    LIMIT 1;
-                ";
-
-                using var reader = await command.ExecuteReaderAsync();
-
-                if (await reader.ReadAsync())
+                var sqlDelNrParam = new SqliteParameter("@delNr", SqliteType.Integer)
                 {
-                    var id = (long)reader["Id"];
-                    var item = (byte[])reader["Item"];
+                    Value = nrOfItems
+                };
 
-                    // Remove the dequeued item from the queue
-                    var deleteCommand = _connection.CreateCommand();
-                    deleteCommand.Transaction = transaction;
-                    deleteCommand.CommandText = "DELETE FROM queue WHERE Id = $id";
-                    deleteCommand.Parameters.AddWithValue("$id", id);
-                    await deleteCommand.ExecuteNonQueryAsync();
+                // Remove the dequeued item from the queue
+                var deleteCommand = _connection.CreateCommand();
+                deleteCommand.Transaction = transaction;
+                deleteCommand.CommandText = "DELETE FROM queue WHERE Id IN (SELECT Id FROM queue ORDER BY Id ASC LIMIT @delNr)";
+                deleteCommand.Parameters.Add(sqlDelNrParam);
+                await deleteCommand.ExecuteNonQueryAsync();
 
-                    await transaction.CommitAsync();
+                await transaction.CommitAsync();
 
-                    return item;
-                }
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
                 throw new InvalidOperationException($"Failed to dequeue item: {ex.Message}", ex);
             }
-
-            return null;
         }
     }
 }

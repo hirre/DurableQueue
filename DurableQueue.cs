@@ -50,19 +50,29 @@ namespace DurableQueue
             }
         }
 
-        public async Task Enqueue(T item)
+        public async Task Enqueue(IEnumerable<T> items)
         {
-            if (item == null)
+            if (items == null || !items.Any())
                 throw new ArgumentNullException("Item cannot be null");
 
             try
             {
                 _qSem.Wait(5000);
 
-                // Convert item to byte array
-                var bytes = MessagePackSerializer.Serialize(item);
-                await _qDb.Enqueue(bytes);
-                _queue.Enqueue(item);
+                var byteList = new List<byte[]>();
+
+                foreach (var item in items)
+                {
+                    var bytes = MessagePackSerializer.Serialize(item);
+                    byteList.Add(bytes);
+                }
+
+                await _qDb.Enqueue(byteList);
+
+                foreach (var item in items)
+                {
+                    _queue.Enqueue(item);
+                }
             }
             catch (Exception ex)
             {
@@ -74,16 +84,26 @@ namespace DurableQueue
             }
         }
 
-        public async Task<T?> Dequeue()
+        public async Task<IEnumerable<T?>> Dequeue(int cnt = 1)
         {
             try
             {
                 await _qSem.WaitAsync(5000);
 
-                var item = MessagePackSerializer.Deserialize<T>(await _qDb.Dequeue());
-                _queue.TryDequeue(out T? qItem);
+                var retList = new List<T?>();
 
-                return qItem;
+                while (_queue.Count > 0 && cnt != retList.Count)
+                {
+                    if (_queue.TryDequeue(out T? qItem))
+                    {
+                        retList.Add(qItem);
+                    }
+                }
+
+                if (retList.Count != 0)
+                    await _qDb.Delete(retList.Count);
+
+                return retList;
             }
             catch (Exception ex)
             {

@@ -7,7 +7,7 @@ namespace DurableQueueTests
         // cleanup
         private const string TestQueueName = "testqueue";
 
-        ~QueueTests()
+        public QueueTests()
         {
             if (File.Exists(TestQueueName))
             {
@@ -16,15 +16,37 @@ namespace DurableQueueTests
         }
 
         [Fact]
-        public async Task Enqueue_ShouldAddItemToQueue()
+        public async Task Enqueue_Items()
         {
             // Arrange
             var queue = new DurableQueue<int>(TestQueueName);
+            var list = new List<int>();
 
-            for (int i = 0; i < 100_000; i++)
+            for (int i = 0; i < 1_000_000; i++)
             {
-                await queue.Enqueue(Random.Shared.Next());
+                list.Add(Random.Shared.Next());
             }
+
+            await queue.Enqueue(list);
+        }
+
+        [Fact]
+        public async Task Dequeue_Items()
+        {
+            // Arrange
+            var queue = new DurableQueue<int>(TestQueueName);
+            var list = new List<int>();
+
+            var itemCnt = 1000_000;
+
+            for (int i = 0; i < itemCnt; i++)
+            {
+                list.Add(Random.Shared.Next());
+            }
+
+            await queue.Enqueue(list);
+
+            var item = await queue.Dequeue(itemCnt);
         }
     }
 }
