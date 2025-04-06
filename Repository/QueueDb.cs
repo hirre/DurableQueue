@@ -84,27 +84,46 @@ namespace DurableQueue.Repository
             await command.ExecuteNonQueryAsync(_cts.Token);
         }
 
-        internal async IAsyncEnumerable<byte[]> LoadItemsToMemory()
+        internal async IAsyncEnumerable<byte[]> LoadItemsToMemory(int limit = 100000)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
 
             var command = _connection.CreateCommand();
+            var offset = 0;
+            bool hasValues;
 
-            command.CommandText =
-            @"
-                SELECT Item
-                FROM queue
-                ORDER BY Id ASC;
-            ";
+            command.CommandText = @"
+                    SELECT Item
+                    FROM queue
+                    ORDER BY Id ASC
+                    LIMIT @limit OFFSET @offset;
+                ";
 
-            using var reader = await command.ExecuteReaderAsync(_cts.Token);
+            var limitParam = new SqliteParameter("@limit", SqliteType.Integer);
+            var offsetParam = new SqliteParameter("@offset", SqliteType.Integer);
+            command.Parameters.Add(limitParam);
+            command.Parameters.Add(offsetParam);
 
-            while (await reader.ReadAsync(_cts.Token))
+            do
             {
-                var item = (byte[])reader["Item"];
-                yield return item;
-            }
+                hasValues = false;
+
+                limitParam.Value = limit;
+                offsetParam.Value = offset;
+
+                using var reader = await command.ExecuteReaderAsync(_cts.Token);
+
+                while (await reader.ReadAsync(_cts.Token))
+                {
+                    hasValues = true;
+                    var item = (byte[])reader["Item"];
+                    yield return item;
+                }
+
+                offset += limit;
+
+            } while (hasValues);
         }
 
         internal async Task Enqueue(IEnumerable<byte[]> items)

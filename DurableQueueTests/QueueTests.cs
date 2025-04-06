@@ -7,11 +7,72 @@ namespace DurableQueueTests
         // cleanup
         private const string TestQueueName = "testqueue";
 
-        public QueueTests()
+        private void Cleanup()
         {
             DelFile($"{TestQueueName}.db");
             DelFile($"{TestQueueName}.db-shm");
             DelFile($"{TestQueueName}.db-wal");
+        }
+
+        [Fact]
+        public async Task Cleanup_Enqueue_Test()
+        {
+            Cleanup(); // Cleanup before starting the test
+            await Task.Delay(5000); // Give time for cleanup
+
+            using var queue = new DurableQueue<int>(TestQueueName);
+
+            var itemCnt = 1000_000;
+
+            for (int i = 0; i < itemCnt; i++)
+            {
+                queue.Enqueue(Random.Shared.Next());
+            }
+
+            await WaitAsync(() => queue.Count, itemCnt);
+
+            if (queue.Count != itemCnt)
+            {
+                Assert.Fail($"Queue count {queue.Count} is not equal to {itemCnt} after 120 s");
+            }
+        }
+
+        [Fact]
+        public async Task Dequeue_Test()
+        {
+            await Task.Delay(5000);
+
+            // Arrange
+            using var queue = new DurableQueue<int>(TestQueueName);
+
+            var itemCnt = 1000_000;
+
+            var items = await queue.Dequeue(itemCnt);
+
+            await WaitAsync(() => queue.Count, itemCnt, increasing: false);
+
+            if (queue.Count != 0)
+            {
+                Assert.Fail($"Queue count {queue.Count} is not equal to 0 after 120 s");
+            }
+        }
+
+        [Fact]
+        public async Task Load_To_Memory_Test()
+        {
+            await Task.Delay(5000); // Give time for cleanup
+            using var queue = new DurableQueue<int>(TestQueueName);
+
+            var list = new List<int>();
+            var itemCnt = 1000_000;
+
+            var items = await queue.Dequeue(itemCnt);
+            await WaitAsync(() => queue.Count, itemCnt, increasing: false);
+
+            if (queue.Count != 0)
+            {
+                Assert.Fail($"Queue count {queue.Count} is not equal to 0 after 120 s");
+            }
         }
 
         private void DelFile(string fileName)
@@ -41,56 +102,6 @@ namespace DurableQueueTests
 
                 } while (!canAccess);
                 File.Delete(file);
-            }
-        }
-
-        [Fact]
-        public async Task Enqueue_Items()
-        {
-            await Task.Delay(5000); // Give time for cleanup
-
-            using var queue = new DurableQueue<int>(TestQueueName);
-
-            var itemCnt = 1000_000;
-
-            for (int i = 0; i < itemCnt; i++)
-            {
-                queue.Enqueue(Random.Shared.Next());
-            }
-
-            await WaitAsync(() => queue.Count, itemCnt);
-
-            if (queue.Count != itemCnt)
-            {
-                Assert.Fail($"Queue count {queue.Count} is not equal to {itemCnt} after 120 s");
-            }
-        }
-
-        [Fact]
-        public async Task Dequeue_Items()
-        {
-            await Task.Delay(5000); // Give time for cleanup
-
-            // Arrange
-            using var queue = new DurableQueue<int>(TestQueueName);
-            var list = new List<int>();
-
-            var itemCnt = 1000_000;
-
-            for (int i = 0; i < itemCnt; i++)
-            {
-                queue.Enqueue(Random.Shared.Next());
-            }
-
-            await WaitAsync(() => queue.Count, itemCnt);
-
-            var items = await queue.Dequeue(itemCnt);
-
-            await WaitAsync(() => queue.Count, itemCnt, increasing: false);
-
-            if (queue.Count != 0)
-            {
-                Assert.Fail($"Queue count {queue.Count} is not equal to 0 after 120 s");
             }
         }
 
