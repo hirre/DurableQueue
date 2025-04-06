@@ -20,7 +20,7 @@ namespace DurableQueue
                 throw new ArgumentNullException("Queue name cannot be null or empty");
 
             _queueName = queueName;
-            _qDatabase = QueueDb.CreateQueue(queueName);
+            _qDatabase = QueueDb.CreateQueue(queueName, _cts);
 
             LoadQueueFromDatabase().GetAwaiter().GetResult();
 
@@ -30,7 +30,11 @@ namespace DurableQueue
 
         public void Dispose()
         {
+            _cts.Cancel();
+            _mre.Reset();
+            _mre.Dispose();
             _qDatabase.Dispose();
+            _qSem.Release();
             _qSem.Dispose();
         }
 
@@ -38,7 +42,7 @@ namespace DurableQueue
         {
             try
             {
-                await _qSem.WaitAsync();
+                await _qSem.WaitAsync(_cts.Token);
 
                 await foreach (var item in _qDatabase.LoadItemsToMemory())
                 {
@@ -76,7 +80,7 @@ namespace DurableQueue
             while (!_cts.IsCancellationRequested)
             {
                 if (_qBuffer.Count == 0)
-                    _mre.Wait();
+                    _mre.Wait(_cts.Token);
 
                 var bSize = 0;
                 buffer.Clear();
@@ -94,7 +98,7 @@ namespace DurableQueue
                         bSize++;
                     }
                 }
-                while (bSize < 100_000 && hasItems);
+                while (bSize < 100_000 && hasItems && !_cts.IsCancellationRequested);
 
                 Console.WriteLine($"Buffer size: {buffer.Count}");
                 await BulkEnqueue(buffer);
@@ -110,7 +114,7 @@ namespace DurableQueue
 
             try
             {
-                _qSem.Wait();
+                _qSem.Wait(_cts.Token);
 
                 var byteList = new List<byte[]>();
 
@@ -141,7 +145,7 @@ namespace DurableQueue
         {
             try
             {
-                await _qSem.WaitAsync();
+                await _qSem.WaitAsync(_cts.Token);
 
                 var retList = new List<T?>();
 

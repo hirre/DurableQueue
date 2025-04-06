@@ -8,20 +8,22 @@ namespace DurableQueue.Repository
         private SqliteConnection? _connection;
         private string _queueName;
         private static ConcurrentDictionary<string, QueueDb> _instances = new();
+        private CancellationTokenSource _cts;
 
-        internal static QueueDb CreateQueue(string queueName)
+        internal static QueueDb CreateQueue(string queueName, CancellationTokenSource cts)
         {
             if (_instances.ContainsKey(queueName))
             {
                 return _instances[queueName];
             }
 
-            return new QueueDb(queueName);
+            return new QueueDb(queueName, cts);
         }
 
-        private QueueDb(string queueName)
+        private QueueDb(string queueName, CancellationTokenSource cts)
         {
             _queueName = queueName;
+            _cts = cts;
 
             if (string.IsNullOrEmpty(queueName))
                 throw new ArgumentNullException("Queue name cannot be null or empty");
@@ -58,6 +60,7 @@ namespace DurableQueue.Repository
 
         public void Dispose()
         {
+            _connection?.Close();
             _connection?.Dispose();
             _instances.TryRemove(_queueName, out _);
         }
@@ -78,7 +81,7 @@ namespace DurableQueue.Repository
                 );
             ";
 
-            await command.ExecuteNonQueryAsync();
+            await command.ExecuteNonQueryAsync(_cts.Token);
         }
 
         internal async IAsyncEnumerable<byte[]> LoadItemsToMemory()
@@ -95,9 +98,9 @@ namespace DurableQueue.Repository
                 ORDER BY Id ASC;
             ";
 
-            using var reader = await command.ExecuteReaderAsync();
+            using var reader = await command.ExecuteReaderAsync(_cts.Token);
 
-            while (await reader.ReadAsync())
+            while (await reader.ReadAsync(_cts.Token))
             {
                 var item = (byte[])reader["Item"];
                 yield return item;
@@ -127,14 +130,14 @@ namespace DurableQueue.Repository
                 {
                     itemParam.Value = data;
                     dateTimeParam.Value = DateTime.UtcNow.ToString("o");
-                    await command.ExecuteNonQueryAsync();
+                    await command.ExecuteNonQueryAsync(_cts.Token);
                 }
 
-                await transaction.CommitAsync();
+                await transaction.CommitAsync(_cts.Token);
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync();
+                await transaction.RollbackAsync(_cts.Token);
                 throw new InvalidOperationException($"Failed to enqueue item: {ex.Message}", ex);
             }
         }
@@ -159,14 +162,14 @@ namespace DurableQueue.Repository
                 deleteCommand.Transaction = transaction;
                 deleteCommand.CommandText = "DELETE FROM queue WHERE Id IN (SELECT Id FROM queue ORDER BY Id ASC LIMIT @delNr)";
                 deleteCommand.Parameters.Add(sqlDelNrParam);
-                await deleteCommand.ExecuteNonQueryAsync();
+                await deleteCommand.ExecuteNonQueryAsync(_cts.Token);
 
-                await transaction.CommitAsync();
+                await transaction.CommitAsync(_cts.Token);
 
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync();
+                await transaction.RollbackAsync(_cts.Token);
                 throw new InvalidOperationException($"Failed to dequeue item: {ex.Message}", ex);
             }
         }

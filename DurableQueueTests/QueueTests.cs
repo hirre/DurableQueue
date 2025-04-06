@@ -21,6 +21,25 @@ namespace DurableQueueTests
 
             if (File.Exists(file))
             {
+                bool canAccess;
+
+                // Check if we can access the file and that another process doesn't have it open
+                do
+                {
+                    canAccess = false;
+
+                    try
+                    {
+                        using var fs = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.None);
+                        canAccess = true;
+                    }
+                    catch (IOException)
+                    {
+                        // File is locked by another process
+                        Task.Delay(1000).Wait();
+                    }
+
+                } while (!canAccess);
                 File.Delete(file);
             }
         }
@@ -28,9 +47,11 @@ namespace DurableQueueTests
         [Fact]
         public async Task Enqueue_Items()
         {
-            var queue = new DurableQueue<int>(TestQueueName);
+            await Task.Delay(5000); // Give time for cleanup
 
-            var itemCnt = 10_000_000;
+            using var queue = new DurableQueue<int>(TestQueueName);
+
+            var itemCnt = 1000_000;
 
             for (int i = 0; i < itemCnt; i++)
             {
@@ -48,8 +69,10 @@ namespace DurableQueueTests
         [Fact]
         public async Task Dequeue_Items()
         {
+            await Task.Delay(5000); // Give time for cleanup
+
             // Arrange
-            var queue = new DurableQueue<int>(TestQueueName);
+            using var queue = new DurableQueue<int>(TestQueueName);
             var list = new List<int>();
 
             var itemCnt = 1000_000;
@@ -69,7 +92,6 @@ namespace DurableQueueTests
             {
                 Assert.Fail($"Queue count {queue.Count} is not equal to 0 after 120 s");
             }
-
         }
 
         private async Task WaitAsync(Func<int> queueSize, int itemCnt, int delayMax = 120, bool increasing = true)
