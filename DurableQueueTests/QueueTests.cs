@@ -26,7 +26,7 @@ namespace DurableQueueTests
 
             for (int i = 0; i < itemCnt; i++)
             {
-                queue.Enqueue(Random.Shared.Next());
+                await queue.Enqueue(Random.Shared.Next());
             }
 
             await WaitAsync(() => queue.Count, itemCnt);

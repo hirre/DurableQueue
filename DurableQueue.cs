@@ -1,28 +1,37 @@
 ﻿using DurableQueue.Repository;
 using MessagePack;
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 
 namespace DurableQueue
 {
     public class DurableQueue<T> : IDisposable
     {
         private readonly string _queueName;
+        private int _bufferSize;
         private QueueDb _qDatabase;
         private readonly ConcurrentQueue<T> _queue = new();
-        private readonly ConcurrentQueue<T> _qBuffer = new();
         private readonly SemaphoreSlim _qSem = new(1);
-        private readonly ManualResetEventSlim _mre = new();
         private readonly CancellationTokenSource _cts = new();
+        private readonly Channel<T> _channel;
 
-        public DurableQueue(string queueName)
+        public DurableQueue(string queueName, int bufferSize = 100_000)
         {
             if (string.IsNullOrEmpty(queueName))
                 throw new ArgumentNullException("Queue name cannot be null or empty");
 
             _queueName = queueName;
+            _bufferSize = bufferSize;
             _qDatabase = QueueDb.CreateQueue(queueName, _cts);
 
             LoadQueueFromDatabase().GetAwaiter().GetResult();
+
+            _channel = Channel.CreateBounded<T>(new BoundedChannelOptions(100_000)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                AllowSynchronousContinuations = false
+            });
 
             Task.Factory.StartNew(BufferEnqueueTask, _cts.Token,
                 TaskCreationOptions.LongRunning, TaskScheduler.Default);
@@ -31,8 +40,6 @@ namespace DurableQueue
         public void Dispose()
         {
             _cts.Cancel();
-            _mre.Reset();
-            _mre.Dispose();
             _qDatabase.Dispose();
             _qSem.Release();
             _qSem.Dispose();
@@ -64,13 +71,12 @@ namespace DurableQueue
 
         public string QueueName => _queueName;
 
-        public void Enqueue(T item)
+        public async Task Enqueue(T item)
         {
             if (item == null)
                 throw new ArgumentNullException("Item cannot be null");
 
-            _qBuffer.Enqueue(item);
-            _mre.Set();
+            await _channel.Writer.WriteAsync(item);
         }
 
         private async Task BufferEnqueueTask()
@@ -79,31 +85,25 @@ namespace DurableQueue
 
             while (!_cts.IsCancellationRequested)
             {
-                if (_qBuffer.Count == 0)
-                    _mre.Wait(_cts.Token);
-
-                var bSize = 0;
-                buffer.Clear();
-
-                bool hasItems;
-
-                do
+                while (await _channel.Reader.WaitToReadAsync(_cts.Token))
                 {
-                    hasItems = _qBuffer.TryDequeue(out T? item);
+                    buffer.Clear();
 
-                    if (hasItems)
+                    await foreach (var item in _channel.Reader.ReadAllAsync(_cts.Token))
                     {
                         if (item != null)
+                        {
                             buffer.Add(item);
-                        bSize++;
+                        }
+
+                        if (buffer.Count >= _bufferSize || _cts.IsCancellationRequested)
+                        {
+                            break;
+                        }
                     }
+
+                    await BulkEnqueue(buffer);
                 }
-                while (bSize < 100_000 && hasItems && !_cts.IsCancellationRequested);
-
-                Console.WriteLine($"Buffer size: {buffer.Count}");
-                await BulkEnqueue(buffer);
-
-                _mre.Reset();
             }
         }
 
