@@ -8,14 +8,14 @@ namespace DurableQueue
     public class DurableQueue<T> : IDisposable
     {
         private readonly string _queueName;
-        private int _bufferSize;
-        private QueueDb _qDatabase;
+        private readonly int _bufferSize;
+        private readonly QueueDb _qDatabase;
         private readonly ConcurrentQueue<T> _queue = new();
         private readonly SemaphoreSlim _qSem = new(1);
         private readonly CancellationTokenSource _cts = new();
         private readonly Channel<T> _channel;
 
-        public DurableQueue(string queueName, int bufferSize = 100_000)
+        private DurableQueue(string queueName, int bufferSize)
         {
             if (string.IsNullOrEmpty(queueName))
                 throw new ArgumentNullException("Queue name cannot be null or empty");
@@ -24,17 +24,12 @@ namespace DurableQueue
             _bufferSize = bufferSize;
             _qDatabase = QueueDb.CreateQueue(queueName, _cts);
 
-            LoadQueueFromDatabase().GetAwaiter().GetResult();
-
             _channel = Channel.CreateBounded<T>(new BoundedChannelOptions(100_000)
             {
                 SingleReader = true,
                 SingleWriter = false,
                 AllowSynchronousContinuations = false
             });
-
-            Task.Factory.StartNew(BufferEnqueueTask, _cts.Token,
-                TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
         public void Dispose()
@@ -43,28 +38,6 @@ namespace DurableQueue
             _qDatabase.Dispose();
             _qSem.Release();
             _qSem.Dispose();
-        }
-
-        private async Task LoadQueueFromDatabase()
-        {
-            try
-            {
-                await _qSem.WaitAsync(_cts.Token);
-
-                await foreach (var item in _qDatabase.LoadItemsToMemory())
-                {
-                    var deserializedItem = MessagePackSerializer.Deserialize<T>(item);
-                    _queue.Enqueue(deserializedItem);
-                }
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to load items from database: {ex.Message}", ex);
-            }
-            finally
-            {
-                _qSem.Release();
-            }
         }
 
         public int Count => _queue.Count;
@@ -77,6 +50,45 @@ namespace DurableQueue
                 throw new ArgumentNullException("Item cannot be null");
 
             await _channel.Writer.WriteAsync(item);
+        }
+
+        public async Task<IEnumerable<T?>> Dequeue(int cnt = 1)
+        {
+            try
+            {
+                await _qSem.WaitAsync(_cts.Token);
+
+                var retList = new List<T?>();
+
+                do
+                {
+                    if (_queue.TryDequeue(out T? qItem))
+                    {
+                        retList.Add(qItem);
+                    }
+                }
+                while (_queue.Count > 0 && retList.Count < cnt);
+
+                if (retList.Count != 0)
+                    await _qDatabase.Delete(retList.Count);
+
+                return retList;
+            }
+            finally
+            {
+                _qSem.Release();
+            }
+        }
+
+        public static async Task<DurableQueue<T>> CreateAsync(string queueName, int bufferSize = 100_000)
+        {
+            var queue = new DurableQueue<T>(queueName, bufferSize);
+            await queue.LoadQueueFromDatabase();
+
+            await Task.Factory.StartNew(queue.BufferEnqueueTask, queue._cts.Token,
+                TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+            return queue;
         }
 
         private async Task BufferEnqueueTask()
@@ -131,41 +143,23 @@ namespace DurableQueue
                     _queue.Enqueue(item);
                 }
             }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to enqueue item: {ex.Message}", ex);
-            }
             finally
             {
                 _qSem.Release();
             }
         }
 
-        public async Task<IEnumerable<T?>> Dequeue(int cnt = 1)
+        private async Task LoadQueueFromDatabase()
         {
             try
             {
                 await _qSem.WaitAsync(_cts.Token);
 
-                var retList = new List<T?>();
-
-                do
+                await foreach (var item in _qDatabase.LoadItemsToMemory(_bufferSize))
                 {
-                    if (_queue.TryDequeue(out T? qItem))
-                    {
-                        retList.Add(qItem);
-                    }
+                    var deserializedItem = MessagePackSerializer.Deserialize<T>(item);
+                    _queue.Enqueue(deserializedItem);
                 }
-                while (_queue.Count > 0 && retList.Count < cnt);
-
-                if (retList.Count != 0)
-                    await _qDatabase.Delete(retList.Count);
-
-                return retList;
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to dequeue item: {ex.Message}", ex);
             }
             finally
             {

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 
 namespace DurableQueue.Repository
 {
@@ -84,7 +85,7 @@ namespace DurableQueue.Repository
             await command.ExecuteNonQueryAsync(_cts.Token);
         }
 
-        internal async IAsyncEnumerable<byte[]> LoadItemsToMemory(int limit = 100000)
+        internal async IAsyncEnumerable<byte[]> LoadItemsToMemory(int limit)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
@@ -157,7 +158,7 @@ namespace DurableQueue.Repository
             catch (Exception ex)
             {
                 await transaction.RollbackAsync(_cts.Token);
-                throw new InvalidOperationException($"Failed to enqueue item: {ex.Message}", ex);
+                ExceptionDispatchInfo.Capture(ex).Throw();
             }
         }
 
@@ -189,7 +190,7 @@ namespace DurableQueue.Repository
             catch (Exception ex)
             {
                 await transaction.RollbackAsync(_cts.Token);
-                throw new InvalidOperationException($"Failed to dequeue item: {ex.Message}", ex);
+                ExceptionDispatchInfo.Capture(ex).Throw();
             }
         }
     }
