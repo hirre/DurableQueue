@@ -4,11 +4,11 @@ using System.Runtime.ExceptionServices;
 
 namespace DurableQueue.Repository
 {
-    public class QueueDb : AbstractDb, IDisposable, IRepository
+    public class SqliteQueueDbImpl : AbstractDb, IDisposable, IRepository
     {
-        private SqliteConnection? _connection;
+        private readonly SqliteConnection? _connection;
 
-        public QueueDb(string queueName, CancellationTokenSource cts) : base(queueName, cts)
+        public SqliteQueueDbImpl(string queueName, CancellationTokenSource cts) : base(queueName, cts)
         {
             var folderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "QueueData");
 

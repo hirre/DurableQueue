@@ -1,12 +1,13 @@
 ﻿using DurableQueue.Interfaces;
 using DurableQueue.Repository;
-using MessagePack;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 namespace DurableQueue
 {
-    public class DurableQueue<TObject, TQueue> : IDisposable where TQueue : IRepository
+    public class DurableQueue<TObject, TQueue, TSerializer> : IDisposable
+        where TQueue : IRepository
+        where TSerializer : ISerializer, new()
     {
         private const int MAX_BUFFER_SIZE = 1_000_000;
 
@@ -17,6 +18,7 @@ namespace DurableQueue
         private readonly SemaphoreSlim _qSem = new(1);
         private readonly CancellationTokenSource _cts = new();
         private readonly Channel<TObject> _channel;
+        private readonly ISerializer _serializer;
 
         private DurableQueue(string queueName, int bufferSize)
         {
@@ -32,6 +34,7 @@ namespace DurableQueue
             _queueName = queueName;
             _bufferSize = bufferSize;
             _qDatabase = AbstractDb.CreateQueue<TQueue>(queueName, _cts);
+            _serializer = new TSerializer();
 
             _channel = Channel.CreateBounded<TObject>(new BoundedChannelOptions(MAX_BUFFER_SIZE)
             {
@@ -90,9 +93,9 @@ namespace DurableQueue
             }
         }
 
-        public static async Task<DurableQueue<TObject, TQueue>> CreateAsync(string queueName, int bufferSize = 100_000)
+        public static async Task<DurableQueue<TObject, TQueue, TSerializer>> CreateAsync(string queueName, int bufferSize = 100_000)
         {
-            var queue = new DurableQueue<TObject, TQueue>(queueName, bufferSize);
+            var queue = new DurableQueue<TObject, TQueue, TSerializer>(queueName, bufferSize);
             await queue.LoadQueueFromDatabase();
 
             await Task.Factory.StartNew(queue.BufferEnqueueTask, queue._cts.Token,
@@ -142,7 +145,7 @@ namespace DurableQueue
 
                 foreach (var item in items)
                 {
-                    var bytes = MessagePackSerializer.Serialize(item);
+                    var bytes = _serializer.Serialize(item);
                     byteList.Add(bytes);
                 }
 
@@ -167,7 +170,7 @@ namespace DurableQueue
 
                 await foreach (var item in _qDatabase.LoadItemsToMemory(_bufferSize))
                 {
-                    var deserializedItem = MessagePackSerializer.Deserialize<TObject>(item);
+                    var deserializedItem = _serializer.Deserialize<TObject>(item);
                     _queue.Enqueue(deserializedItem);
                 }
             }
