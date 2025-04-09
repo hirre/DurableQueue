@@ -1,21 +1,22 @@
-﻿using DurableQueue.Repository;
+﻿using DurableQueue.Interfaces;
+using DurableQueue.Repository;
 using MessagePack;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 namespace DurableQueue
 {
-    public class DurableQueue<T> : IDisposable
+    public class DurableQueue<TObject, TQueue> : IDisposable where TQueue : IRepository
     {
         private const int MAX_BUFFER_SIZE = 1_000_000;
 
         private readonly string _queueName;
         private readonly int _bufferSize;
-        private readonly QueueDb _qDatabase;
-        private readonly ConcurrentQueue<T> _queue = new();
+        private readonly IRepository _qDatabase;
+        private readonly ConcurrentQueue<TObject> _queue = new();
         private readonly SemaphoreSlim _qSem = new(1);
         private readonly CancellationTokenSource _cts = new();
-        private readonly Channel<T> _channel;
+        private readonly Channel<TObject> _channel;
 
         private DurableQueue(string queueName, int bufferSize)
         {
@@ -30,9 +31,9 @@ namespace DurableQueue
 
             _queueName = queueName;
             _bufferSize = bufferSize;
-            _qDatabase = QueueDb.CreateQueue(queueName, _cts);
+            _qDatabase = AbstractDb.CreateQueue<TQueue>(queueName, _cts);
 
-            _channel = Channel.CreateBounded<T>(new BoundedChannelOptions(MAX_BUFFER_SIZE)
+            _channel = Channel.CreateBounded<TObject>(new BoundedChannelOptions(MAX_BUFFER_SIZE)
             {
                 SingleReader = true,
                 SingleWriter = false,
@@ -52,7 +53,7 @@ namespace DurableQueue
 
         public string QueueName => _queueName;
 
-        public async Task Enqueue(T item)
+        public async Task Enqueue(TObject item)
         {
             if (item == null)
                 throw new ArgumentNullException("Item cannot be null");
@@ -60,17 +61,17 @@ namespace DurableQueue
             await _channel.Writer.WriteAsync(item);
         }
 
-        public async Task<IEnumerable<T?>> Dequeue(int cnt = 1)
+        public async Task<IEnumerable<TObject?>> Dequeue(int cnt = 1)
         {
             try
             {
                 await _qSem.WaitAsync(_cts.Token);
 
-                var retList = new List<T?>();
+                var retList = new List<TObject?>();
 
                 do
                 {
-                    if (_queue.TryDequeue(out T? qItem))
+                    if (_queue.TryDequeue(out TObject? qItem))
                     {
                         retList.Add(qItem);
                     }
@@ -88,9 +89,9 @@ namespace DurableQueue
             }
         }
 
-        public static async Task<DurableQueue<T>> CreateAsync(string queueName, int bufferSize = 100_000)
+        public static async Task<DurableQueue<TObject, TQueue>> CreateAsync(string queueName, int bufferSize = 100_000)
         {
-            var queue = new DurableQueue<T>(queueName, bufferSize);
+            var queue = new DurableQueue<TObject, TQueue>(queueName, bufferSize);
             await queue.LoadQueueFromDatabase();
 
             await Task.Factory.StartNew(queue.BufferEnqueueTask, queue._cts.Token,
@@ -101,7 +102,7 @@ namespace DurableQueue
 
         private async Task BufferEnqueueTask()
         {
-            var buffer = new List<T>();
+            var buffer = new List<TObject>();
 
             while (!_cts.IsCancellationRequested)
             {
@@ -127,7 +128,7 @@ namespace DurableQueue
             }
         }
 
-        private async Task BulkEnqueue(IEnumerable<T> items)
+        private async Task BulkEnqueue(IEnumerable<TObject> items)
         {
             if (items == null || !items.Any())
                 throw new ArgumentNullException("Item cannot be null");
@@ -165,7 +166,7 @@ namespace DurableQueue
 
                 await foreach (var item in _qDatabase.LoadItemsToMemory(_bufferSize))
                 {
-                    var deserializedItem = MessagePackSerializer.Deserialize<T>(item);
+                    var deserializedItem = MessagePackSerializer.Deserialize<TObject>(item);
                     _queue.Enqueue(deserializedItem);
                 }
             }

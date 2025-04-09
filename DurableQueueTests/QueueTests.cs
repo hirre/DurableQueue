@@ -1,4 +1,5 @@
 ﻿using DurableQueue;
+using DurableQueue.Repository;
 
 namespace DurableQueueTests
 {
@@ -20,7 +21,7 @@ namespace DurableQueueTests
             Cleanup(); // Cleanup before starting the test
             await Task.Delay(5000); // Give time for cleanup
 
-            using var queue = await DurableQueue<int>.CreateAsync(TestQueueName);
+            using var queue = await DurableQueue<int, QueueDb>.CreateAsync(TestQueueName);
 
             var itemCnt = 1000_000;
 
@@ -43,7 +44,7 @@ namespace DurableQueueTests
             await Task.Delay(5000);
 
             // Arrange
-            using var queue = await DurableQueue<int>.CreateAsync(TestQueueName);
+            using var queue = await DurableQueue<int, QueueDb>.CreateAsync(TestQueueName);
 
             var itemCnt = 1000_000;
 
@@ -61,7 +62,7 @@ namespace DurableQueueTests
         public async Task Load_To_Memory_Test()
         {
             await Task.Delay(5000); // Give time for cleanup
-            using var queue = await DurableQueue<int>.CreateAsync(TestQueueName);
+            using var queue = await DurableQueue<int, QueueDb>.CreateAsync(TestQueueName);
 
             var list = new List<int>();
             var itemCnt = 1000_000;

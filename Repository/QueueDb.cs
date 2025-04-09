@@ -1,34 +1,15 @@
-﻿using Microsoft.Data.Sqlite;
-using System.Collections.Concurrent;
+﻿using DurableQueue.Interfaces;
+using Microsoft.Data.Sqlite;
 using System.Runtime.ExceptionServices;
 
 namespace DurableQueue.Repository
 {
-    internal class QueueDb : IDisposable
+    public class QueueDb : AbstractDb, IDisposable, IRepository
     {
         private SqliteConnection? _connection;
-        private string _queueName;
-        private static ConcurrentDictionary<string, QueueDb> _instances = new();
-        private CancellationTokenSource _cts;
 
-        internal static QueueDb CreateQueue(string queueName, CancellationTokenSource cts)
+        public QueueDb(string queueName, CancellationTokenSource cts) : base(queueName, cts)
         {
-            if (_instances.ContainsKey(queueName))
-            {
-                return _instances[queueName];
-            }
-
-            return new QueueDb(queueName, cts);
-        }
-
-        private QueueDb(string queueName, CancellationTokenSource cts)
-        {
-            _queueName = queueName;
-            _cts = cts;
-
-            if (string.IsNullOrEmpty(queueName))
-                throw new ArgumentNullException("Queue name cannot be null or empty");
-
             var folderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "QueueData");
 
             if (!Directory.Exists(folderPath))
@@ -55,15 +36,13 @@ namespace DurableQueue.Repository
             }
 
             CreateDbQueueIfNotExists().GetAwaiter().GetResult();
-
-            _instances.TryAdd(_queueName, this);
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
             _connection?.Close();
             _connection?.Dispose();
-            _instances.TryRemove(_queueName, out _);
+            base.Dispose();
         }
 
         private async Task CreateDbQueueIfNotExists()
@@ -82,10 +61,10 @@ namespace DurableQueue.Repository
                 );
             ";
 
-            await command.ExecuteNonQueryAsync(_cts.Token);
+            await command.ExecuteNonQueryAsync(Cts.Token);
         }
 
-        internal async IAsyncEnumerable<byte[]> LoadItemsToMemory(int limit)
+        public async IAsyncEnumerable<byte[]> LoadItemsToMemory(int limit)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
@@ -113,9 +92,9 @@ namespace DurableQueue.Repository
                 limitParam.Value = limit;
                 offsetParam.Value = offset;
 
-                using var reader = await command.ExecuteReaderAsync(_cts.Token);
+                using var reader = await command.ExecuteReaderAsync(Cts.Token);
 
-                while (await reader.ReadAsync(_cts.Token))
+                while (await reader.ReadAsync(Cts.Token))
                 {
                     hasValues = true;
                     var item = (byte[])reader["Item"];
@@ -127,7 +106,7 @@ namespace DurableQueue.Repository
             } while (hasValues);
         }
 
-        internal async Task Enqueue(IEnumerable<byte[]> items)
+        public async Task Enqueue(IEnumerable<byte[]> items)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
@@ -150,19 +129,19 @@ namespace DurableQueue.Repository
                 {
                     itemParam.Value = data;
                     dateTimeParam.Value = DateTime.UtcNow.ToString("o");
-                    await command.ExecuteNonQueryAsync(_cts.Token);
+                    await command.ExecuteNonQueryAsync(Cts.Token);
                 }
 
-                await transaction.CommitAsync(_cts.Token);
+                await transaction.CommitAsync(Cts.Token);
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync(_cts.Token);
+                await transaction.RollbackAsync(Cts.Token);
                 ExceptionDispatchInfo.Capture(ex).Throw();
             }
         }
 
-        internal async Task Delete(int nrOfItems)
+        public async Task Delete(int nrOfItems)
         {
             if (_connection == null)
                 throw new InvalidOperationException("Database connection is not initialized.");
@@ -182,14 +161,14 @@ namespace DurableQueue.Repository
                 deleteCommand.Transaction = transaction;
                 deleteCommand.CommandText = "DELETE FROM queue WHERE Id IN (SELECT Id FROM queue ORDER BY Id ASC LIMIT @delNr)";
                 deleteCommand.Parameters.Add(sqlDelNrParam);
-                await deleteCommand.ExecuteNonQueryAsync(_cts.Token);
+                await deleteCommand.ExecuteNonQueryAsync(Cts.Token);
 
-                await transaction.CommitAsync(_cts.Token);
+                await transaction.CommitAsync(Cts.Token);
 
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync(_cts.Token);
+                await transaction.RollbackAsync(Cts.Token);
                 ExceptionDispatchInfo.Capture(ex).Throw();
             }
         }
