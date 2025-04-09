@@ -47,6 +47,7 @@ namespace DurableQueue
             _qDatabase.Dispose();
             _qSem.Release();
             _qSem.Dispose();
+            GC.SuppressFinalize(this);
         }
 
         public int Count => _queue.Count;
