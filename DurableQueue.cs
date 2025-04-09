@@ -7,6 +7,8 @@ namespace DurableQueue
 {
     public class DurableQueue<T> : IDisposable
     {
+        private const int MAX_BUFFER_SIZE = 1_000_000;
+
         private readonly string _queueName;
         private readonly int _bufferSize;
         private readonly QueueDb _qDatabase;
@@ -20,11 +22,17 @@ namespace DurableQueue
             if (string.IsNullOrEmpty(queueName))
                 throw new ArgumentNullException("Queue name cannot be null or empty");
 
+            if (bufferSize <= 0)
+                throw new ArgumentOutOfRangeException("Buffer size must be greater than zero");
+
+            if (bufferSize > MAX_BUFFER_SIZE)
+                throw new ArgumentOutOfRangeException($"Buffer size must be less than {MAX_BUFFER_SIZE}");
+
             _queueName = queueName;
             _bufferSize = bufferSize;
             _qDatabase = QueueDb.CreateQueue(queueName, _cts);
 
-            _channel = Channel.CreateBounded<T>(new BoundedChannelOptions(100_000)
+            _channel = Channel.CreateBounded<T>(new BoundedChannelOptions(MAX_BUFFER_SIZE)
             {
                 SingleReader = true,
                 SingleWriter = false,
