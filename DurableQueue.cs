@@ -168,6 +168,18 @@ namespace DurableQueue
             {
                 await _qSem.WaitAsync(_cts.Token);
 
+                var memoryInfo = GC.GetGCMemoryInfo();
+
+                var storedItems = await _qDatabase.Count();
+
+                var allocObj = default(TObject);
+                var allocObjMemEstimateSize = _serializer.Serialize(allocObj).Length;
+
+                var memAllocatedEstimate = storedItems * allocObjMemEstimateSize;
+
+                if (memAllocatedEstimate / memoryInfo.TotalAvailableMemoryBytes >= 0.9)
+                    throw new InvalidOperationException("Not enough memory to load the queue");
+
                 await foreach (var item in _qDatabase.LoadItemsToMemory(_bufferSize))
                 {
                     var deserializedItem = _serializer.Deserialize<TObject>(item);

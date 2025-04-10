@@ -172,5 +172,27 @@ namespace DurableQueue.Repository
                 ExceptionDispatchInfo.Capture(ex).Throw();
             }
         }
+
+        public async Task<long> Count()
+        {
+            if (_connection == null)
+                throw new InvalidOperationException("Database connection is not initialized.");
+
+            var command = _connection.CreateCommand();
+
+            command.CommandText = @"
+                    SELECT COUNT(Id) as Cnt
+                    FROM queue;
+                ";
+
+            using var reader = await command.ExecuteReaderAsync(Cts.Token);
+
+            long count = 0;
+
+            if (await reader.ReadAsync(Cts.Token))
+                count = (long)reader["Cnt"];
+
+            return count;
+        }
     }
 }

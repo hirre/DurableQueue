@@ -7,5 +7,7 @@
         public Task Enqueue(IEnumerable<byte[]> items);
 
         public Task Delete(int nrOfItems);
+
+        public Task<long> Count();
     }
 }
